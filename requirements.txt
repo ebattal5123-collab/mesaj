@@ -2,4 +2,5 @@ flask>=2.3.3
 flask-socketio==5.3.4
 pymongo==4.5.0
 dnspython==2.3.0
-eventlet==0.33.3
+setuptools
+eventlet>=0.33.3
