@@ -704,6 +704,9 @@ def handle_connect():
 def handle_disconnect():
     print(f'❌ Kullanıcı ayrıldı - SID: {request.sid}')
 
+import eventlet
+import eventlet.wsgi
+
 if __name__ == '__main__':
     print('\n' + '='*60)
     print('🚀 GRUP SOHBET SUNUCUSU BAŞLATILDI! (MongoDB)')
@@ -721,4 +724,4 @@ if __name__ == '__main__':
     print('='*60 + '\n')
 
     port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port)
+    eventlet.wsgi.server(eventlet.listen(('0.0.0.0', port)), app)
