@@ -705,13 +705,14 @@ def handle_disconnect():
     print(f'❌ Kullanıcı ayrıldı - SID: {request.sid}')
 
 import eventlet
-import eventlet.wsgi
+eventlet.monkey_patch()
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    eventlet.monkey_patch()  # Bu çok önemli!
     print(f"🚀 Server is running on port {port}")
     eventlet.wsgi.server(eventlet.listen(('0.0.0.0', port)), app)
+
 
 
 if __name__ == '__main__':
