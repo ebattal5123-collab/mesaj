@@ -1,3 +1,25 @@
+import eventlet
+eventlet.monkey_patch()  # ⚡ En başta, diğer importlardan önce
+
+from flask import Flask, jsonify, request
+from flask_socketio import SocketIO, emit, join_room, leave_room
+from datetime import datetime
+from pymongo import MongoClient, ASCENDING, DESCENDING
+from bson import ObjectId
+import os
+
+# buradan sonrası senin normal kodun
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'gizli-anahtar-2024'
+socketio = SocketIO(app, 
+                    cors_allowed_origins="*", 
+                    async_mode='threading', 
+                    logger=True, 
+                    engineio_logger=True,
+                    ping_timeout=60,
+                    ping_interval=25)
+
+# MongoDB, route ve socket olayları vs.
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from datetime import datetime
@@ -705,11 +727,11 @@ def handle_disconnect():
     print(f'❌ Kullanıcı ayrıldı - SID: {request.sid}')
 
 import eventlet
-eventlet.monkey_patch()
-
+import eventlet.wsgi
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
+    eventlet.monkey_patch()  # Çok önemli!
     print(f"🚀 Server is running on port {port}")
     eventlet.wsgi.server(eventlet.listen(('0.0.0.0', port)), app)
 
