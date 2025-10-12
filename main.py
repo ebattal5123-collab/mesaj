@@ -905,4 +905,6 @@ if __name__ == '__main__':
     print('   • 🔹 ÖZEL SOHBET SİSTEMİ (Sadece 2 kullanıcı görür)')
     print('   • Modern ve şık tasarım')
     print('='*60 + '\n')
-    socketio.run(app, host='127.0.0.1', port=5000, debug=True, allow_unsafe_werkzeug=True)
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host="0.0.0.0", port=port, debug=False)
