@@ -9,7 +9,7 @@ import os
 import uuid
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'gizli-anahtar-2024'
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'gizli-anahtar-2024')
 socketio = SocketIO(app, 
                    cors_allowed_origins="*", 
                    async_mode='threading',
@@ -23,7 +23,7 @@ active_users = {}  # {socket_id: {'username': '...', 'user_id': '...', 'socket_i
 
 
 # MongoDB bağlantısı
-MONGODB_URI = "mongodb+srv://Eymen:Eymen6969@cluster0.vqwhlrj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+MONGODB_URI = os.environ.get('MONGODB_URI', "mongodb+srv://Eymen:Eymen6969@cluster0.vqwhlrj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 
 try:
     client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
