@@ -2,6 +2,6 @@
   "name": "flask-chat",
   "version": "1.0.0",
   "scripts": {
-    "start": "python app.py"
+    "start": "python main.py"
   }
 }
