@@ -1,31 +1,12 @@
 import eventlet
 eventlet.monkey_patch()  # ⚡ En başta, diğer importlardan önce
-
-from flask import Flask, jsonify, request
+from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from datetime import datetime
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from bson import ObjectId
 import os
-
-# buradan sonrası senin normal kodun
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'gizli-anahtar-2024'
-socketio = SocketIO(app, 
-                    cors_allowed_origins="*", 
-                    async_mode='threading', 
-                    logger=True, 
-                    engineio_logger=True,
-                    ping_timeout=60,
-                    ping_interval=25)
-
-# MongoDB, route ve socket olayları vs.
-from flask import Flask, jsonify, request
-from flask_socketio import SocketIO, emit, join_room, leave_room
-from datetime import datetime
-from pymongo import MongoClient, ASCENDING, DESCENDING
-from bson import ObjectId
-import os
+import uuid
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'gizli-anahtar-2024'
@@ -36,6 +17,9 @@ socketio = SocketIO(app,
                    engineio_logger=True,
                    ping_timeout=60,
                    ping_interval=25)
+
+# 🔹 Aktif kullanıcıları takip etmek için
+active_users = {}  # {socket_id: {'username': '...', 'user_id': '...', 'socket_id': '...'}}
 
 
 # MongoDB bağlantısı
@@ -118,6 +102,22 @@ HTML_PAGE = """<!DOCTYPE html>
             font-size: 13px;
             opacity: 0.8;
             color: #ecf0f1;
+            word-break: break-all;
+        }
+        .user-id-display {
+            font-size: 11px;
+            color: #95a5a6;
+            margin-top: 5px;
+            font-family: monospace;
+            background: #34495e;
+            padding: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .user-id-display:hover {
+            background: #667eea;
+            color: white;
         }
         .rooms-list {
             flex: 1;
@@ -143,6 +143,9 @@ HTML_PAGE = """<!DOCTYPE html>
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             font-weight: 600;
+        }
+        .room-item.private {
+            border-left: 3px solid #f39c12;
         }
         .room-icon {
             font-size: 22px;
@@ -180,8 +183,37 @@ HTML_PAGE = """<!DOCTYPE html>
             font-weight: bold;
             transition: transform 0.2s;
             font-size: 14px;
+            margin-bottom: 8px;
         }
         .new-room-btn:hover {
+            transform: scale(1.02);
+        }
+        .private-room-input {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 12px;
+            background: #34495e;
+            color: white;
+            margin-bottom: 8px;
+        }
+        .private-room-input::placeholder {
+            color: #95a5a6;
+        }
+        .private-btn {
+            width: 100%;
+            padding: 10px;
+            background: #f39c12;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 12px;
+            transition: transform 0.2s;
+        }
+        .private-btn:hover {
             transform: scale(1.02);
         }
         .chat-container {
@@ -374,11 +406,15 @@ HTML_PAGE = """<!DOCTYPE html>
             <div class="sidebar-header">
                 <h2>🏠 Sohbet Odaları</h2>
                 <div class="user-info" id="userInfo"></div>
+                <div class="user-id-display" id="userIdDisplay" title="Kliklayarak kopyala"></div>
             </div>
             <div class="rooms-list" id="roomsList"></div>
             <div class="new-room-section">
                 <input type="text" class="new-room-input" id="newRoomInput" placeholder="Yeni oda adı" maxlength="30">
                 <button class="new-room-btn" onclick="createRoom()">➕ Oda Oluştur</button>
+                
+                <input type="text" class="private-room-input" id="privateUserIdInput" placeholder="Özel sohbet için ID girin" maxlength="50">
+                <button class="private-btn" onclick="startPrivateChat()">🔒 Özel Sohbet</button>
             </div>
         </div>
         <div class="chat-container">
@@ -400,6 +436,7 @@ HTML_PAGE = """<!DOCTYPE html>
     <script>
         var socket;
         var username = '';
+        var userId = '';
         var currentRoom = 'Genel';
         
         function login() {
@@ -424,8 +461,15 @@ HTML_PAGE = """<!DOCTYPE html>
             
             socket.on('connect', function() {
                 console.log('✅ Socket bağlandı! ID:', socket.id);
+                socket.emit('register_user', { username: username });
+            });
+            
+            socket.on('user_registered', function(data) {
+                userId = data.user_id;
+                document.getElementById('userIdDisplay').textContent = '🔑 ID: ' + userId;
+                console.log('✅ Kullanıcı kaydedildi. ID:', userId);
+                
                 if (currentRoom) {
-                    console.log('Odaya yeniden katılınıyor:', currentRoom);
                     socket.emit('join_room', { room: currentRoom, username: username });
                 }
             });
@@ -447,6 +491,12 @@ HTML_PAGE = """<!DOCTYPE html>
                 console.log('🆕 Yeni oda oluşturuldu:', data.name);
                 addRoomToList(data.name);
             });
+            
+            socket.on('private_room_created', function(data) {
+                console.log('🔒 Özel oda oluşturuldu:', data.room);
+                addRoomToList(data.room, true);
+                joinRoom(data.room);
+            });
         }
         
         function loadRooms() {
@@ -456,20 +506,22 @@ HTML_PAGE = """<!DOCTYPE html>
                     var roomsList = document.getElementById('roomsList');
                     roomsList.innerHTML = '';
                     rooms.forEach(function(room) {
-                        addRoomToList(room.name);
+                        addRoomToList(room.name, false);
                     });
                     setActiveRoom('Genel');
                     joinRoom('Genel');
                 });
         }
         
-        function addRoomToList(roomName) {
+        function addRoomToList(roomName, isPrivate) {
+            if (typeof isPrivate === 'undefined') isPrivate = false;
+            
             var roomsList = document.getElementById('roomsList');
             var existingRoom = document.querySelector('[data-room="' + roomName + '"]');
             if (existingRoom) return;
             
             var roomItem = document.createElement('div');
-            roomItem.className = 'room-item';
+            roomItem.className = 'room-item' + (isPrivate ? ' private' : '');
             roomItem.setAttribute('data-room', roomName);
             roomItem.onclick = function() { joinRoom(roomName); };
             
@@ -480,7 +532,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 'Müzik': '🎵',
                 'Oyun': '🎮'
             };
-            var icon = icons[roomName] || '📌';
+            var icon = isPrivate ? '🔒' : (icons[roomName] || '📌');
             
             roomItem.innerHTML = '<span class="room-icon">' + icon + '</span><span class="room-name">' + roomName + '</span>';
             roomsList.appendChild(roomItem);
@@ -518,7 +570,8 @@ HTML_PAGE = """<!DOCTYPE html>
                 'Müzik': '🎵',
                 'Oyun': '🎮'
             };
-            var icon = icons[roomName] || '📌';
+            var isPrivate = roomName.includes('_private_');
+            var icon = isPrivate ? '🔒' : (icons[roomName] || '📌');
             
             document.getElementById('currentRoomName').innerHTML = '<span class="room-icon">' + icon + '</span> ' + roomName;
             setActiveRoom(roomName);
@@ -593,13 +646,36 @@ HTML_PAGE = """<!DOCTYPE html>
                     if (data.success) {
                         input.value = '';
                         socket.emit('new_room', { name: roomName });
-                        addRoomToList(roomName);
+                        addRoomToList(roomName, false);
                         joinRoom(roomName);
                     } else {
                         alert(data.message || 'Oda oluşturulamadı!');
                     }
                 });
             }
+        }
+        
+        function startPrivateChat() {
+            var input = document.getElementById('privateUserIdInput');
+            var targetUserId = input.value.trim();
+            
+            if (!targetUserId) {
+                alert('Lütfen geçerli bir ID girin!');
+                return;
+            }
+            
+            if (targetUserId === userId) {
+                alert('Kendinizle özel sohbet yapamazsınız!');
+                return;
+            }
+            
+            socket.emit('start_private_chat', {
+                from_id: userId,
+                to_id: targetUserId,
+                username: username
+            });
+            
+            input.value = '';
         }
         
         function scrollToBottom() {
@@ -617,6 +693,21 @@ HTML_PAGE = """<!DOCTYPE html>
         
         document.getElementById('newRoomInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') createRoom();
+        });
+        
+        document.getElementById('privateUserIdInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') startPrivateChat();
+        });
+        
+        document.getElementById('userIdDisplay').addEventListener('click', function() {
+            var text = userId;
+            var textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            alert('ID kopyalandı: ' + text);
         });
     </script>
 </body>
@@ -664,6 +755,20 @@ def get_messages():
         print(f'❌ Mesaj yükleme hatası: {e}')
         return jsonify([])
 
+@socketio.on('register_user')
+def handle_register_user(data):
+    username = data.get('username', 'Anonim')
+    user_id = str(uuid.uuid4())[:8].upper()
+    
+    active_users[request.sid] = {
+        'username': username,
+        'user_id': user_id,
+        'socket_id': request.sid
+    }
+    
+    print(f'✅ Kullanıcı kaydedildi - Adı: {username}, ID: {user_id}, SID: {request.sid}')
+    emit('user_registered', {'user_id': user_id})
+
 @socketio.on('send_message')
 def handle_message(data):
     username = data.get('username', 'Anonim')
@@ -683,11 +788,13 @@ def handle_message(data):
     print(f'📢 Mesaj {room} odasındaki herkese yayınlandı')
     
     try:
+        is_private = '_private_' in room
         messages_collection.insert_one({
             'username': username,
             'message': message,
             'timestamp': timestamp,
             'room': room,
+            'private': is_private,
             'created_at': datetime.now()
         })
         print(f'💾 Mesaj MongoDB\'ye kaydedildi')
@@ -701,12 +808,14 @@ def handle_join_room(data):
     join_room(room)
     print(f'✅ {username} (SID: {request.sid}) -> {room} odasına katıldı')
     
-    socketio.emit('receive_message', {
-        'username': 'Sistem',
-        'message': f'{username} odaya katıldı',
-        'timestamp': datetime.now().strftime('%H:%M'),
-        'room': room
-    }, to=room)
+    # Sistem mesajını gönder (sadece özel odalar için gönderme)
+    if '_private_' not in room:
+        socketio.emit('receive_message', {
+            'username': 'Sistem',
+            'message': f'{username} odaya katıldı',
+            'timestamp': datetime.now().strftime('%H:%M'),
+            'room': room
+        }, to=room)
 
 @socketio.on('leave_room')
 def handle_leave_room(data):
@@ -718,40 +827,82 @@ def handle_leave_room(data):
 def handle_new_room(data):
     emit('room_created', {'name': data['name']}, broadcast=True)
 
+@socketio.on('start_private_chat')
+def handle_start_private_chat(data):
+    from_id = data.get('from_id')
+    to_id = data.get('to_id')
+    username = data.get('username')
+    
+    # Hedef kullanıcıyı bul
+    target_user = None
+    target_socket_id = None
+    
+    for sid, user_data in active_users.items():
+        if user_data['user_id'] == to_id:
+            target_user = user_data
+            target_socket_id = sid
+            break
+    
+    if not target_user:
+        emit('error_message', {
+            'message': '❌ Kullanıcı çevrimiçi değil veya ID hatalı!'
+        })
+        print(f'❌ Özel sohbet hatası: Hedef kullanıcı {to_id} bulunamadı')
+        return
+    
+    # Özel oda adı oluştur (her zaman aynı oda adı kullanılsın)
+    private_room = f'_private_{sorted([from_id, to_id])[0]}_{sorted([from_id, to_id])[1]}'
+    
+    print(f'🔒 Özel sohbet başlatılıyor: {username} ({from_id}) <-> {target_user["username"]} ({to_id})')
+    print(f'🔒 Oda adı: {private_room}')
+    
+    # Her iki kullanıcıyı da özel odaya davet et
+    socketio.emit('private_room_created', {
+        'room': private_room,
+        'other_username': target_user['username'],
+        'other_id': to_id
+    }, to=request.sid)
+    
+    socketio.emit('private_room_created', {
+        'room': private_room,
+        'other_username': username,
+        'other_id': from_id
+    }, to=target_socket_id)
+    
+    print(f'✅ Özel oda oluşturuldu: {private_room}')
+
 @socketio.on('connect')
 def handle_connect():
-    print(f'✅ Kullanıcı bağlandı - SID: {request.sid}')
+    user_ip = request.remote_addr
+    sid = request.sid
+    print(f'✅ Kullanıcı bağlandı - SID: {sid}, IP: {user_ip}')
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    print(f'❌ Kullanıcı ayrıldı - SID: {request.sid}')
-
-import eventlet
-import eventlet.wsgi
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    eventlet.monkey_patch()  # Çok önemli!
-    print(f"🚀 Server is running on port {port}")
-    eventlet.wsgi.server(eventlet.listen(('0.0.0.0', port)), app)
-
+    sid = request.sid
+    if sid in active_users:
+        user_info = active_users[sid]
+        print(f'❌ Kullanıcı ayrıldı - Adı: {user_info["username"]}, ID: {user_info["user_id"]}, SID: {sid}')
+        del active_users[sid]
+    else:
+        print(f'❌ Kullanıcı ayrıldı - SID: {sid}')
 
 
 if __name__ == '__main__':
     print('\n' + '='*60)
     print('🚀 GRUP SOHBET SUNUCUSU BAŞLATILDI! (MongoDB)')
     print('='*60)
-    print('📍 Tarayıcıda şu adresi aç: http://127.0.0.1:5000')
-    print('💡 Veya şunu dene: http://localhost:5000')
+    print('📍 Tarayıcıda bu adresi aç: http://127.0.0.1:5000')
+    print('📍 Veya şunu dene: http://localhost:5000')
     print('='*60)
     print('✨ Özellikler:')
-    print('• MongoDB Atlas bağlantısı')
-    print('• 5 Varsayılan oda (Genel, Teknoloji, Spor, Müzik, Oyun)')
-    print('• Yeni oda oluşturma')
-    print('• Her odanın bağımsız mesaj sistemi')
-    print('• Gerçek zamanlı mesajlaşma')
-    print('• Modern ve şık tasarım')
+    print('   • MongoDB Atlas bağlantısı')
+    print('   • 5 Varsayılan oda (Genel, Teknoloji, Spor, Müzik, Oyun)')
+    print('   • Yeni oda oluşturma')
+    print('   • Her odanın bağımsız mesaj sistemi')
+    print('   • Gerçek zamanlı mesajlaşma')
+    print('   • 🔹 HER KULLANICIYI BENZERSIZ BİR ID VER')
+    print('   • 🔹 ÖZEL SOHBET SİSTEMİ (Sadece 2 kullanıcı görür)')
+    print('   • Modern ve şık tasarım')
     print('='*60 + '\n')
-
-    port = int(os.environ.get('PORT', 5000))
-    eventlet.wsgi.server(eventlet.listen(('0.0.0.0', port)), app)
+    socketio.run(app, host='127.0.0.1', port=5000, debug=True, allow_unsafe_werkzeug=True)
