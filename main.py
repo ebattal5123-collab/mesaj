@@ -7,28 +7,39 @@ from pymongo import MongoClient, ASCENDING, DESCENDING
 from bson import ObjectId
 import os
 import uuid
+import logging
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'gizli-anahtar-2024')
-socketio = SocketIO(app, 
-                   cors_allowed_origins="*", 
-                   async_mode='threading',
-                   logger=True,
-                   engineio_logger=True,
-                   ping_timeout=60,
-                   ping_interval=25)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'gizli-anahtar-2024')
 
-# 🔹 Aktif kullanıcıları takip etmek için
-active_users = {}  # {socket_id: {'username': '...', 'user_id': '...', 'socket_id': '...'}}
+# Logging konfigürasyonu
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='threading',
+    logger=False,
+    engineio_logger=False,
+    ping_timeout=60,
+    ping_interval=25,
+    transport=['websocket', 'polling']
+)
+
+# Aktif kullanıcıları takip etmek için
+active_users = {}
 
 # MongoDB bağlantısı
-MONGODB_URI = os.environ.get('MONGODB_URI', "mongodb+srv://Eymen:Eymen6969@cluster0.vqwhlrj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+MONGODB_URI = os.environ.get(
+    'MONGODB_URI',
+    'mongodb+srv://Eymen:Eymen6969@cluster0.vqwhlrj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
+)
 
 try:
     client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
     client.admin.command('ping')
-    print('✅ MongoDB bağlantısı başarılı!')
+    logger.info('✅ MongoDB bağlantısı başarılı!')
     
     db = client.chat_db
     messages_collection = db.messages
@@ -37,10 +48,10 @@ try:
     messages_collection.create_index([("room", ASCENDING), ("timestamp", DESCENDING)])
     rooms_collection.create_index([("name", ASCENDING)], unique=True)
     
-    print('✅ Index\'ler oluşturuldu')
+    logger.info('✅ Index\'ler oluşturuldu')
     
 except Exception as e:
-    print(f'❌ MongoDB bağlantı hatası: {e}')
+    logger.error(f'❌ MongoDB bağlantı hatası: {e}')
     exit(1)
 
 def init_db():
@@ -48,7 +59,7 @@ def init_db():
     for room_name in default_rooms:
         try:
             rooms_collection.insert_one({'name': room_name, 'created_at': datetime.now()})
-            print(f'✅ Oda oluşturuldu: {room_name}')
+            logger.info(f'✅ Oda oluşturuldu: {room_name}')
         except:
             pass
 
@@ -456,7 +467,11 @@ HTML_PAGE = """<!DOCTYPE html>
             socket = io({
                 transports: ['websocket', 'polling'],
                 upgrade: true,
-                rememberUpgrade: true
+                rememberUpgrade: true,
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000,
+                reconnectionAttempts: 5
             });
             
             socket.on('connect', function() {
@@ -496,6 +511,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 console.log('🔒 Özel oda oluşturuldu:', data.room);
                 addRoomToList(data.room, true);
                 joinRoom(data.room);
+            });
+            
+            socket.on('error_message', function(data) {
+                alert(data.message);
             });
         }
         
@@ -723,7 +742,7 @@ def get_rooms():
         rooms = list(rooms_collection.find({}, {'_id': 0, 'name': 1}).sort('name', ASCENDING))
         return jsonify(rooms)
     except Exception as e:
-        print(f'❌ Oda listesi hatası: {e}')
+        logger.error(f'❌ Oda listesi hatası: {e}')
         return jsonify([])
 
 @app.route('/api/create_room', methods=['POST'])
@@ -749,10 +768,10 @@ def get_messages():
             {'_id': 0, 'username': 1, 'message': 1, 'timestamp': 1}
         ).sort('_id', ASCENDING).limit(100))
         
-        print(f'✅ Oda: {room}, Mesaj sayısı: {len(messages)}')
+        logger.info(f'✅ Oda: {room}, Mesaj sayısı: {len(messages)}')
         return jsonify(messages)
     except Exception as e:
-        print(f'❌ Mesaj yükleme hatası: {e}')
+        logger.error(f'❌ Mesaj yükleme hatası: {e}')
         return jsonify([])
 
 @socketio.on('register_user')
@@ -766,7 +785,7 @@ def handle_register_user(data):
         'socket_id': request.sid
     }
     
-    print(f'✅ Kullanıcı kaydedildi - Adı: {username}, ID: {user_id}, SID: {request.sid}')
+    logger.info(f'✅ Kullanıcı kaydedildi - Adı: {username}, ID: {user_id}, SID: {request.sid}')
     emit('user_registered', {'user_id': user_id})
 
 @socketio.on('send_message')
@@ -776,7 +795,7 @@ def handle_message(data):
     room = data.get('room', 'Genel')
     timestamp = datetime.now().strftime('%H:%M')
     
-    print(f'📨 Mesaj alındı -> Kullanıcı: {username}, Oda: {room}, Mesaj: {message}')
+    logger.info(f'📨 Mesaj alındı -> Kullanıcı: {username}, Oda: {room}, Mesaj: {message}')
     
     socketio.emit('receive_message', {
         'username': username,
@@ -785,7 +804,7 @@ def handle_message(data):
         'room': room
     }, to=room)
     
-    print(f'📢 Mesaj {room} odasındaki herkese yayınlandı')
+    logger.info(f'📢 Mesaj {room} odasındaki herkese yayınlandı')
     
     try:
         is_private = '_private_' in room
@@ -797,18 +816,17 @@ def handle_message(data):
             'private': is_private,
             'created_at': datetime.now()
         })
-        print(f'💾 Mesaj MongoDB\'ye kaydedildi')
+        logger.info(f'💾 Mesaj MongoDB\'ye kaydedildi')
     except Exception as e:
-        print(f'❌ MongoDB kayıt hatası: {e}')
+        logger.error(f'❌ MongoDB kayıt hatası: {e}')
 
 @socketio.on('join_room')
 def handle_join_room(data):
     room = data.get('room', 'Genel')
     username = data.get('username', 'Anonim')
     join_room(room)
-    print(f'✅ {username} (SID: {request.sid}) -> {room} odasına katıldı')
+    logger.info(f'✅ {username} (SID: {request.sid}) -> {room} odasına katıldı')
     
-    # Sistem mesajını gönder (sadece özel odalar için gönderme)
     if '_private_' not in room:
         socketio.emit('receive_message', {
             'username': 'Sistem',
@@ -819,9 +837,10 @@ def handle_join_room(data):
 
 @socketio.on('leave_room')
 def handle_leave_room(data):
-    room = data['room']
+    room = data.get('room')
+    username = data.get('username', 'Anonim')
     leave_room(room)
-    print(f'❌ Kullanıcı {room} odasından ayrıldı')
+    logger.info(f'❌ {username} {room} odasından ayrıldı')
 
 @socketio.on('new_room')
 def handle_new_room(data):
@@ -833,7 +852,6 @@ def handle_start_private_chat(data):
     to_id = data.get('to_id')
     username = data.get('username')
     
-    # Hedef kullanıcıyı bul
     target_user = None
     target_socket_id = None
     
@@ -847,16 +865,14 @@ def handle_start_private_chat(data):
         emit('error_message', {
             'message': '❌ Kullanıcı çevrimiçi değil veya ID hatalı!'
         })
-        print(f'❌ Özel sohbet hatası: Hedef kullanıcı {to_id} bulunamadı')
+        logger.info(f'❌ Özel sohbet hatası: Hedef kullanıcı {to_id} bulunamadı')
         return
     
-    # Özel oda adı oluştur (her zaman aynı oda adı kullanılsın)
     private_room = f'_private_{sorted([from_id, to_id])[0]}_{sorted([from_id, to_id])[1]}'
     
-    print(f'🔒 Özel sohbet başlatılıyor: {username} ({from_id}) <-> {target_user["username"]} ({to_id})')
-    print(f'🔒 Oda adı: {private_room}')
+    logger.info(f'🔒 Özel sohbet başlatılıyor: {username} ({from_id}) <-> {target_user["username"]} ({to_id})')
+    logger.info(f'🔒 Oda adı: {private_room}')
     
-    # Her iki kullanıcıyı da özel odaya davet et
     socketio.emit('private_room_created', {
         'room': private_room,
         'other_username': target_user['username'],
@@ -869,42 +885,41 @@ def handle_start_private_chat(data):
         'other_id': from_id
     }, to=target_socket_id)
     
-    print(f'✅ Özel oda oluşturuldu: {private_room}')
+    logger.info(f'✅ Özel oda oluşturuldu: {private_room}')
 
 @socketio.on('connect')
 def handle_connect():
     user_ip = request.remote_addr
     sid = request.sid
-    print(f'✅ Kullanıcı bağlandı - SID: {sid}, IP: {user_ip}')
+    logger.info(f'✅ Kullanıcı bağlandı - SID: {sid}, IP: {user_ip}')
 
 @socketio.on('disconnect')
 def handle_disconnect():
     sid = request.sid
     if sid in active_users:
         user_info = active_users[sid]
-        print(f'❌ Kullanıcı ayrıldı - Adı: {user_info["username"]}, ID: {user_info["user_id"]}, SID: {sid}')
+        logger.info(f'❌ Kullanıcı ayrıldı - Adı: {user_info["username"]}, ID: {user_info["user_id"]}, SID: {sid}')
         del active_users[sid]
     else:
-        print(f'❌ Kullanıcı ayrıldı - SID: {sid}')
-
+        logger.info(f'❌ Kullanıcı ayrıldı - SID: {sid}')
 
 if __name__ == '__main__':
-    print('\n' + '='*60)
-    print('🚀 GRUP SOHBET SUNUCUSU BAŞLATILDI! (MongoDB)')
-    print('='*60)
-    print('📍 Tarayıcıda bu adresi aç: http://127.0.0.1:5000')
-    print('📍 Veya şunu dene: http://localhost:5000')
-    print('='*60)
-    print('✨ Özellikler:')
-    print('   • MongoDB Atlas bağlantısı')
-    print('   • 5 Varsayılan oda (Genel, Teknoloji, Spor, Müzik, Oyun)')
-    print('   • Yeni oda oluşturma')
-    print('   • Her odanın bağımsız mesaj sistemi')
-    print('   • Gerçek zamanlı mesajlaşma')
-    print('   • 🔹 HER KULLANICIYI BENZERSIZ BİR ID VER')
-    print('   • 🔹 ÖZEL SOHBET SİSTEMİ (Sadece 2 kullanıcı görür)')
-    print('   • Modern ve şık tasarım')
-    print('='*60 + '\n')
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port, debug=False)
+    logger.info('\n' + '='*60)
+    logger.info('🚀 GRUP SOHBET SUNUCUSU BAŞLATILDI! (MongoDB)')
+    logger.info('='*60)
+    logger.info('📍 Tarayıcıda bu adresi aç: http://127.0.0.1:5000')
+    logger.info('📍 Veya şunu dene: http://localhost:5000')
+    logger.info('='*60)
+    logger.info('✨ Özellikler:')
+    logger.info('   • MongoDB Atlas bağlantısı')
+    logger.info('   • 5 Varsayılan oda (Genel, Teknoloji, Spor, Müzik, Oyun)')
+    logger.info('   • Yeni oda oluşturma')
+    logger.info('   • Her odanın bağımsız mesaj sistemi')
+    logger.info('   • Gerçek zamanlı mesajlaşma')
+    logger.info('   • HER KULLANICIYI BENZERSIZ BİR ID VER')
+    logger.info('   • ÖZEL SOHBET SİSTEMİ (Sadece 2 kullanıcı görür)')
+    logger.info('   • Modern ve şık tasarım')
+    logger.info('='*60 + '\n')
+    
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)
