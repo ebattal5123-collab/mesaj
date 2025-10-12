@@ -904,22 +904,28 @@ def handle_disconnect():
         logger.info(f'❌ Kullanıcı ayrıldı - SID: {sid}')
 
 if __name__ == '__main__':
-    logger.info('\n' + '='*60)
-    logger.info('🚀 GRUP SOHBET SUNUCUSU BAŞLATILDI! (MongoDB)')
-    logger.info('='*60)
-    logger.info('📍 Tarayıcıda bu adresi aç: http://127.0.0.1:5000')
-    logger.info('📍 Veya şunu dene: http://localhost:5000')
-    logger.info('='*60)
-    logger.info('✨ Özellikler:')
-    logger.info('   • MongoDB Atlas bağlantısı')
-    logger.info('   • 5 Varsayılan oda (Genel, Teknoloji, Spor, Müzik, Oyun)')
-    logger.info('   • Yeni oda oluşturma')
-    logger.info('   • Her odanın bağımsız mesaj sistemi')
-    logger.info('   • Gerçek zamanlı mesajlaşma')
-    logger.info('   • HER KULLANICIYI BENZERSIZ BİR ID VER')
-    logger.info('   • ÖZEL SOHBET SİSTEMİ (Sadece 2 kullanıcı görür)')
-    logger.info('   • Modern ve şık tasarım')
-    logger.info('='*60 + '\n')
+    print('\n' + '='*60)
+    print('🚀 GRUP SOHBET SUNUCUSU BAŞLATILDI! (MongoDB)')
+    print('='*60)
+    print('📍 Render\'da çalışıyor...')
+    print('='*60)
+    print('✨ Özellikler:')
+    print('   • MongoDB Atlas bağlantısı')
+    print('   • 5 Varsayılan oda (Genel, Teknoloji, Spor, Müzik, Oyun)')
+    print('   • Yeni oda oluşturma')
+    print('   • Her odanın bağımsız mesaj sistemi')
+    print('   • Gerçek zamanlı mesajlaşma')
+    print('   • HER KULLANICIYI BENZERSIZ BİR ID VER')
+    print('   • ÖZEL SOHBET SİSTEMİ (Sadece 2 kullanıcı görür)')
+    print('   • Modern ve şık tasarım')
+    print('='*60 + '\n')
     
     port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    socketio.run(
+        app, 
+        host='0.0.0.0', 
+        port=port, 
+        debug=False,
+        use_reloader=False,
+        log_output=False
+    )
