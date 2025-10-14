@@ -922,7 +922,6 @@ if __name__ == '__main__':
     print('   • ÖZEL SOHBET SİSTEMİ (Sadece 2 kullanıcı görür)')
     print('   • Modern ve şık tasarım')
     print('='*60 + '\n')
-    
     port = int(os.environ.get('PORT', 5000))
     socketio.run(
         app, 
