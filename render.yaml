@@ -2,8 +2,7 @@ services:
   - type: web
     name: grup-sohbet
     env: python
-    pythonVersion: 3.10.12
-    buildCommand: pip install --upgrade pip setuptools && pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python main.py
     envVars:
       - key: FLASK_ENV
