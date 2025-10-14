@@ -914,16 +914,16 @@ if __name__ == '__main__':
     print('   • Yeni oda oluşturma')
     print('   • Her odanın bağımsız mesaj sistemi')
     print('   • Gerçek zamanlı mesajlaşma')
-    print('   • HER KULLANICIYI BENZERSIZ BİR ID VER')
-    print('   • ÖZEL SOHBET SİSTEMİ (Sadece 2 kullanıcı görür)')
+    print('   • Her kullanıcıya benzersiz ID verilir')
+    print('   • Özel sohbet sistemi (sadece 2 kullanıcı görür)')
     print('   • Modern ve şık tasarım')
     print('='*60 + '\n')
-    port = int(os.environ.get('PORT', 5000))
+
+    port = int(os.environ.get("PORT", 5000))
     socketio.run(
-        app, 
-        host='0.0.0.0', 
-        port=port, 
+        app,
+        host="0.0.0.0",
+        port=port,
         debug=False,
-        use_reloader=False,
-        log_output=False
+        allow_unsafe_werkzeug=True  # 🔥 Burası kritik!
     )
